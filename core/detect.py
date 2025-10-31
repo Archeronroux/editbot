@@ -3,22 +3,17 @@ import cv2
 import numpy as np
 from typing import Tuple
 from cfg import cfg
-
-def _templates_dir(mode: str, theme: str) -> str:
-    return os.path.join(cfg["templates_dir"], mode, theme)
+from core.utils import tpl_root, resolve_anchor_path
 
 def detect_mode_auto(img_bgr) -> str:
-    # Heuristik ringan: match anchor khusus mode
-    anchors = [
-        ("android", "anchors/anchor_mode.png"),
-        ("iphone",  "anchors/anchor_mode.png"),
-    ]
+    # Heuristik: bandingkan anchor_mode untuk android vs iphone (light pack)
     scores = []
-    for mode, rel in anchors:
-        p = os.path.join(cfg["templates_dir"], mode, "light", rel)  # light sebagai patokan
-        if not os.path.exists(p):
+    for mode in ("android", "iphone"):
+        p = resolve_anchor_path(mode, "light", "anchor_mode.png")
+        if not p or not os.path.exists(p):
             continue
-        s = _best_match_score(img_bgr, cv2.imread(p, cv2.IMREAD_GRAYSCALE))
+        anchor = cv2.imread(p, cv2.IMREAD_GRAYSCALE)
+        s = _best_match_score(img_bgr, anchor)
         scores.append((s, mode))
     if not scores:
         return "android"
@@ -26,7 +21,6 @@ def detect_mode_auto(img_bgr) -> str:
     return scores[0][1]
 
 def detect_theme(img_bgr) -> str:
-    # Luminance kasar di area tengah
     h, w = img_bgr.shape[:2]
     cx1, cy1, cx2, cy2 = int(w*0.35), int(h*0.25), int(w*0.65), int(h*0.45)
     crop = img_bgr[cy1:cy2, cx1:cx2]
@@ -37,22 +31,22 @@ def detect_theme(img_bgr) -> str:
     return "light" if lightness > cfg["theme_threshold"] else "dark"
 
 def locate_number_roi(img_bgr, mode: str, theme: str) -> Tuple[int, int, int, int]:
-    # Cari posisi anchor "anggota"
-    anchor_path = os.path.join(_templates_dir(mode, theme), "anchors", "anggota.png")
-    if not os.path.exists(anchor_path):
-        # fallback ke light
-        anchor_path = os.path.join(_templates_dir(mode, "light"), "anchors", "anggota.png")
+    # Cari anchor "anggota"
+    anchor_path = resolve_anchor_path(mode, theme, "anggota.png")
+    if not anchor_path:
+        # fallback kasar: pakai threshold untuk menemukan area teks
+        gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
+        H, W = gray.shape[:2]
+        return (int(W*0.45)-130, int(H*0.20)+10, 260, 80)
     anchor = cv2.imread(anchor_path, cv2.IMREAD_GRAYSCALE)
     x, y, w, h = _match_anchor(img_bgr, anchor)
 
-    # Hitung ROI angka berdasarkan offset per-mode
     off = cfg["roi"][mode]
     rx = max(0, x + off["dx"])
     ry = max(0, y + off["dy"])
     rw = off["w"]
     rh = off["h"]
 
-    # Clamp
     H, W = img_bgr.shape[:2]
     rx = min(max(0, rx), W-1)
     ry = min(max(0, ry), H-1)
@@ -75,7 +69,6 @@ def _match_anchor(img_bgr, anchor_gray):
             best = (max_val, (max_loc[0], max_loc[1], aw, ah))
     score, (x, y, w, h) = best
     if score < cfg["match_threshold"]:
-        # jika gagal, ambil posisi kira-kira tengah sebagai fallback
         H, W = gray.shape[:2]
         w, h = anchor_gray.shape[1], anchor_gray.shape[0]
         return (W//2 - w//2, int(H*0.35), w, h)
