@@ -6,7 +6,6 @@ from cfg import cfg
 from core.utils import resolve_anchor_path
 
 def detect_mode_auto(img_bgr) -> str:
-    # Heuristik: bandingkan anchor_mode untuk android vs iphone (pakai light sbg patokan)
     scores = []
     for mode in ("android", "iphone"):
         p = resolve_anchor_path(mode, "light", "anchor_mode")
@@ -31,50 +30,59 @@ def detect_theme_hint(img_bgr) -> str:
 
 def locate_number_roi(img_bgr, mode: str, theme_hint: Optional[str] = None):
     """
-    Cari anchor 'anggota' pada kedua tema (light & dark), pilih yang skornya terbaik.
-    Kembalikan ((rx, ry, rw, rh), theme_used)
+    Temukan anchor 'anggota' pada band vertikal lokasi baris 'Grup · X anggota'.
+    Coba light & dark, pilih skor terbaik dalam band tersebut.
+    Kembalikan ((rx, ry, rw, rh), theme_used).
     """
+    H, W = img_bgr.shape[:2]
+    # Band vertikal per-mode; menyempitkan area pencarian agar tidak kena judul grup
+    if mode == "android":
+        y0, y1 = int(0.30 * H), int(0.52 * H)
+    else:  # iphone
+        y0, y1 = int(0.24 * H), int(0.48 * H)
+    y0 = max(0, min(H-1, y0))
+    y1 = max(y0+8, min(H, y1))
+
     themes_try = ["light", "dark"]
     if theme_hint in ("light", "dark"):
-        # prioritaskan hint terlebih dulu
         themes_try = [theme_hint] + [t for t in themes_try if t != theme_hint]
 
-    best = None  # (score, x, y, w, h, theme)
+    best = None  # (score, global_x, global_y, w, h, theme_used)
+    band = img_bgr[y0:y1, :]
+
     for th in themes_try:
         anchor_path = resolve_anchor_path(mode, th, "anggota")
         if not anchor_path:
             continue
         anchor = cv2.imread(anchor_path, cv2.IMREAD_GRAYSCALE)
-        s, (x, y, w, h) = _match_anchor_with_score(img_bgr, anchor)
+        s, (bx, by, bw, bh) = _match_anchor_in_band(band, anchor)
         if best is None or s > best[0]:
-            best = (s, x, y, w, h, th)
+            best = (s, bx, by + y0, bw, bh, th)  # offset y kembali ke koordinat global
 
-    if best is None or best[0] < max(0.6, cfg["match_threshold"] - 0.1):
-        # fallback kasar jika anchor tidak ketemu sama sekali
-        gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
-        H, W = gray.shape[:2]
+    # Jika gagal keras, fallback kasar
+    if best is None or best[0] < max(0.65, cfg["match_threshold"] - 0.05):
         rx = int(W*0.42); ry = int(H*0.22); rw = int(W*0.20); rh = int(H*0.06)
         return (rx, ry, rw, rh), (theme_hint or "light")
 
     _, x, y, w, h, theme_used = best
 
-    # ROI proporsional terhadap tinggi anchor
-    H, W = img_bgr.shape[:2]
+    # ROI proporsional terhadap tinggi anchor; ditempatkan di kiri 'anggota'
     ah = max(12, h)
-    pad_right = int(0.28 * ah)     # jarak dari kata 'anggota'
-    rw = int(8.2 * ah)             # lebar cukup untuk 5 digit + titik
-    rh = int(1.9 * ah)             # tinggi sedikit > anchor
-    rx = x - pad_right - rw        # di kiri anchor
+    pad_right = int(0.28 * ah)   # jarak aman dari huruf 'a' pertama
+    rw = int(8.2 * ah)           # muat sampai 5 digit + titik
+    rh = int(1.9 * ah)
+    rx = x - pad_right - rw
     ry = y - int(0.38 * ah)
 
+    # Clamp
     rx = max(0, rx); ry = max(0, ry)
     if rx + rw > W: rw = W - rx
     if ry + rh > H: rh = H - ry
 
     return (rx, ry, rw, rh), theme_used
 
-def _match_anchor_with_score(img_bgr, anchor_gray):
-    gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
+def _match_anchor_in_band(band_bgr, anchor_gray):
+    gray = cv2.cvtColor(band_bgr, cv2.COLOR_BGR2GRAY)
     best = (-1.0, (0, 0, anchor_gray.shape[1], anchor_gray.shape[0]))
     for s in cfg["match_scales"]:
         ah = int(anchor_gray.shape[0]*s)
