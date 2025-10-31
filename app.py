@@ -4,6 +4,9 @@ import os
 from contextlib import suppress
 from typing import Dict, Any, Optional
 
+from dotenv import load_dotenv  # NEW: load .env automatically
+load_dotenv()
+
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.filters import Command
 from aiogram.types import Message, FSInputFile
