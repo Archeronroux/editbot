@@ -56,9 +56,10 @@ async def user_worker(bot: Bot, uid: int):
                     )
 
                 caption = f"Selesai ✅\nMode: {meta['mode']} • Tema: {meta['theme']}"
-                await bot.send_document(
+                # Kirim sebagai foto (compressed) agar langsung terlihat di chat
+                await bot.send_photo(
                     chat_id=uid,
-                    document=FSInputFile(result_path),
+                    photo=FSInputFile(result_path),
                     caption=caption
                 )
             except Exception as e:
@@ -91,7 +92,7 @@ async def cmd_help(msg: Message):
         "1) /android atau /iphone untuk set mode manual, /all untuk auto.\n"
         "2) Kirim screenshot dengan caption angka target (contoh: 2578).\n"
         "3) Maks 5 gambar di antrian per user. Proses paralel & aman.\n"
-        "Catatan: Bot mengirim hasil sebagai dokumen agar metadata & resolusi tetap utuh."
+        "Catatan: Bot mengirim hasil sebagai foto (compressed) agar langsung terlihat."
     )
 
 @router.message(Command("android"))
