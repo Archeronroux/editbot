@@ -3,36 +3,31 @@ import cv2
 import numpy as np
 from typing import Tuple
 from cfg import cfg
+from core.utils import resolve_digit_path
 
 def inpaint_region(img_bgr, roi: Tuple[int, int, int, int]):
     x, y, w, h = roi
     out = img_bgr.copy()
     patch = out[y:y+h, x:x+w]
     mask = np.full((h, w), 255, dtype=np.uint8)
-    # Inpaint cepat
     repaired = cv2.inpaint(patch, mask, 3, cv2.INPAINT_TELEA)
     out[y:y+h, x:x+w] = repaired
     return out
 
 def compose_number_from_templates(text: str, mode: str, theme: str):
-    # text termasuk separator "." bila perlu
-    folder = os.path.join(cfg["templates_dir"], mode, theme, "digits")
     images = []
     for ch in text:
         name = "dot.png" if ch == "." else f"{ch}.png"
-        p = os.path.join(folder, name)
-        if not os.path.exists(p):
-            # fallback ke light
-            p = os.path.join(cfg["templates_dir"], mode, "light", "digits", name)
-        img = cv2.imread(p, cv2.IMREAD_UNCHANGED)  # RGBA
-        if img is None:
-            raise RuntimeError(f"Template digit tidak ditemukan: {p}")
+        p = resolve_digit_path(mode, theme, name)
+        if not p:
+            raise RuntimeError(f"Template digit tidak ditemukan: {mode}/{theme}/{name}")
+        img = cv2.imread(p, cv2.IMREAD_UNCHANGED)
+        if img is None or img.shape[2] != 4:
+            raise RuntimeError(f"File template bukan RGBA: {p}")
         images.append(img)
 
-    # Gabung horizontal dengan kerning ringan berdasar alpha bounding box
     strips = []
     for img in images:
-        # trim alpha padding
         alpha = img[:, :, 3]
         xs = np.where(alpha.any(axis=0))[0]
         if xs.size == 0:
@@ -41,7 +36,6 @@ def compose_number_from_templates(text: str, mode: str, theme: str):
             img = img[:, xs[0]:xs[-1]+1, :]
             strips.append(img)
 
-    # sisipkan jarak kecil antar digit
     space = 4
     width = sum(s.shape[1] for s in strips) + space*(len(strips)-1)
     height = max(s.shape[0] for s in strips)
@@ -56,12 +50,9 @@ def compose_number_from_templates(text: str, mode: str, theme: str):
 
 def render_number_into_roi(img_bgr, number_rgba, roi: Tuple[int, int, int, int]):
     x, y, w, h = roi
-    # Resize jumlah digit ke tinggi ROI dengan aspect ratio
     scale = h / number_rgba.shape[0]
     new_w = max(1, int(number_rgba.shape[1]*scale))
     number = cv2.resize(number_rgba, (new_w, h), interpolation=cv2.INTER_AREA)
-
-    # Align ke kanan (umum di UI)
     pos_x = x + w - number.shape[1]
     pos_y = y
 
