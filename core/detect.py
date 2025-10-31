@@ -31,27 +31,43 @@ def detect_theme(img_bgr) -> str:
     return "light" if lightness > cfg["theme_threshold"] else "dark"
 
 def locate_number_roi(img_bgr, mode: str, theme: str) -> Tuple[int, int, int, int]:
-    # Cari anchor "anggota"
+    """
+    Temukan area angka '… anggota' secara dinamis.
+    Strategi:
+    - Temukan anchor 'anggota' via template matching.
+    - ROI diletakkan di kiri anchor dengan ukuran proporsional terhadap tinggi anchor,
+      sehingga stabil di berbagai skala (DPI).
+    """
     anchor_path = resolve_anchor_path(mode, theme, "anggota.png")
     if not anchor_path:
-        # fallback kasar: pakai threshold untuk menemukan area teks
+        # fallback kasar
         gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
         H, W = gray.shape[:2]
-        return (int(W*0.45)-130, int(H*0.20)+10, 260, 80)
+        return (int(W*0.42), int(H*0.22), int(W*0.18), int(H*0.05))
+
     anchor = cv2.imread(anchor_path, cv2.IMREAD_GRAYSCALE)
     x, y, w, h = _match_anchor(img_bgr, anchor)
 
-    off = cfg["roi"][mode]
-    rx = max(0, x + off["dx"])
-    ry = max(0, y + off["dy"])
-    rw = off["w"]
-    rh = off["h"]
-
+    # Hitung ROI berbasis tinggi anchor
     H, W = img_bgr.shape[:2]
-    rx = min(max(0, rx), W-1)
-    ry = min(max(0, ry), H-1)
-    rw = min(rw, W - rx)
-    rh = min(rh, H - ry)
+    ah = max(12, h)
+    # padding kecil dari sisi kanan agar tidak menimpa kata 'anggota'
+    pad_right = int(0.25 * ah)
+    # lebar ROI cukup untuk sampai 5 digit + titik ribuan
+    rw = int(7.5 * ah)
+    # tinggi ROI sedikit lebih tinggi dari anchor
+    rh = int(1.8 * ah)
+    rx = x - pad_right - rw
+    ry = y - int(0.35 * ah)
+
+    # Clamp ke batas gambar
+    rx = max(0, rx)
+    ry = max(0, ry)
+    if rx + rw > W:
+        rw = W - rx
+    if ry + rh > H:
+        rh = H - ry
+
     return (rx, ry, rw, rh)
 
 def _match_anchor(img_bgr, anchor_gray):
