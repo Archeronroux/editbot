@@ -4,13 +4,14 @@ import os
 from contextlib import suppress
 from typing import Dict, Any, Optional
 
-from dotenv import load_dotenv  # NEW: load .env automatically
+from dotenv import load_dotenv  # Load .env otomatis
 load_dotenv()
 
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.filters import Command
 from aiogram.types import Message, FSInputFile
 from aiogram.enums.parse_mode import ParseMode
+from aiogram.client.default import DefaultBotProperties  # NEW: default bot properties
 
 from cfg import cfg
 from core.process import process_image_pipeline
@@ -162,7 +163,12 @@ async def main():
     if not token:
         raise RuntimeError("BOT_TOKEN belum diisi. Lihat .env.example")
     await startup_template_check()
-    bot = Bot(token=token, parse_mode=ParseMode.HTML)
+
+    # FIX untuk aiogram >= 3.7.0: gunakan DefaultBotProperties
+    bot = Bot(
+        token=token,
+        default=DefaultBotProperties(parse_mode=ParseMode.HTML)
+    )
     dp = Dispatcher()
     dp.include_router(router)
     await dp.start_polling(bot)
