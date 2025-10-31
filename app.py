@@ -11,7 +11,7 @@ from aiogram import Bot, Dispatcher, F, Router
 from aiogram.filters import Command
 from aiogram.types import Message, FSInputFile
 from aiogram.enums.parse_mode import ParseMode
-from aiogram.client.default import DefaultBotProperties  # NEW: default bot properties
+from aiogram.client.default import DefaultBotProperties  # default bot props (aiogram >= 3.7)
 
 from cfg import cfg
 from core.process import process_image_pipeline
@@ -77,7 +77,7 @@ async def user_worker(bot: Bot, uid: int):
 @router.message(Command("start"))
 async def cmd_start(msg: Message):
     get_user_state(msg.from_user.id)
-    await msg.reply(
+    await msg.answer(
         "Halo! 👋 Kirim screenshot Info Grup WhatsApp + caption angka target.\n"
         "Pilih mode:\n"
         "/android • /iphone • /all (deteksi otomatis)\n\n"
@@ -86,7 +86,7 @@ async def cmd_start(msg: Message):
 
 @router.message(Command("help"))
 async def cmd_help(msg: Message):
-    await msg.reply(
+    await msg.answer(
         "Panduan singkat:\n"
         "1) /android atau /iphone untuk set mode manual, /all untuk auto.\n"
         "2) Kirim screenshot dengan caption angka target (contoh: 2578).\n"
@@ -98,19 +98,19 @@ async def cmd_help(msg: Message):
 async def cmd_android(msg: Message):
     st = get_user_state(msg.from_user.id)
     st["mode"] = "android"
-    await msg.reply("Mode disetel ke ANDROID ✅\nKirim screenshot + caption angka target.")
+    await msg.answer("Mode disetel ke ANDROID ✅\nKirim screenshot + caption angka target.")
 
 @router.message(Command("iphone"))
 async def cmd_iphone(msg: Message):
     st = get_user_state(msg.from_user.id)
     st["mode"] = "iphone"
-    await msg.reply("Mode disetel ke IPHONE ✅\nKirim screenshot + caption angka target.")
+    await msg.answer("Mode disetel ke IPHONE ✅\nKirim screenshot + caption angka target.")
 
 @router.message(Command("all"))
 async def cmd_all(msg: Message):
     st = get_user_state(msg.from_user.id)
     st["mode"] = "all"
-    await msg.reply("Mode disetel ke AUTO-DETECT ✅\nKirim screenshot + caption angka target.")
+    await msg.answer("Mode disetel ke AUTO-DETECT ✅\nKirim screenshot + caption angka target.")
 
 @router.message(F.photo | F.document)
 async def handle_image(msg: Message, bot: Bot):
@@ -120,7 +120,7 @@ async def handle_image(msg: Message, bot: Bot):
     caption = (msg.caption or "").strip()
     target_number = parse_target_number(caption)
     if target_number is None:
-        await msg.reply("Mohon sertakan caption angka target. Contoh: 1234")
+        await msg.answer("Mohon sertakan caption angka target. Contoh: 1234")
         return
 
     file_id = msg.photo[-1].file_id if msg.photo else msg.document.file_id
@@ -131,7 +131,7 @@ async def handle_image(msg: Message, bot: Bot):
 
     queue = st["queue"]
     if queue.full():
-        await msg.reply("Antrian Anda sudah 5 pekerjaan. Mohon tunggu hasil sebelumnya ya 🙏")
+        await msg.answer("Antrian Anda sudah 5 pekerjaan. Mohon tunggu hasil sebelumnya ya 🙏")
         return
 
     await queue.put({
@@ -144,7 +144,7 @@ async def handle_image(msg: Message, bot: Bot):
         st["worker"] = asyncio.create_task(user_worker(bot, msg.from_user.id))
 
     pos = queue.qsize()
-    await msg.reply(f"✅ Ditambahkan ke antrian. Posisi Anda: {pos}. Akan diproses segera.")
+    await msg.answer(f"✅ Ditambahkan ke antrian. Posisi Anda: {pos}. Akan diproses segera.")
 
 async def startup_template_check():
     missing = []
@@ -164,7 +164,7 @@ async def main():
         raise RuntimeError("BOT_TOKEN belum diisi. Lihat .env.example")
     await startup_template_check()
 
-    # FIX untuk aiogram >= 3.7.0: gunakan DefaultBotProperties
+    # aiogram >= 3.7: gunakan DefaultBotProperties untuk parse_mode default
     bot = Bot(
         token=token,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML)
