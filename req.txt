@@ -1,0 +1,5 @@
+aiogram>=3.3.0
+opencv-python-headless>=4.10.0
+Pillow>=10.4.0
+numpy>=1.26.4
+piexif>=1.1.3

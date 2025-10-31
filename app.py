@@ -1,0 +1,163 @@
+import asyncio
+import logging
+import os
+from contextlib import suppress
+from typing import Dict, Any, Optional
+
+from aiogram import Bot, Dispatcher, F, Router
+from aiogram.filters import Command
+from aiogram.types import Message, FSInputFile
+from aiogram.enums.parse_mode import ParseMode
+
+from cfg import cfg
+from core.process import process_image_pipeline
+from core.utils import parse_target_number, ensure_dirs
+
+logging.basicConfig(level=logging.INFO)
+router = Router()
+
+# State in-memory per user
+USER_STATE: Dict[int, Dict[str, Any]] = {}
+GLOBAL_SEMAPHORE = asyncio.Semaphore(cfg["max_global_workers"])
+
+def get_user_state(uid: int) -> Dict[str, Any]:
+    if uid not in USER_STATE:
+        USER_STATE[uid] = {
+            "mode": "android",      # default
+            "queue": asyncio.Queue(maxsize=cfg["per_user_queue"]),
+            "worker": None
+        }
+    return USER_STATE[uid]
+
+async def user_worker(bot: Bot, uid: int):
+    state = get_user_state(uid)
+    queue = state["queue"]
+    processing_msg: Optional[Message] = None
+    try:
+        while True:
+            item = await queue.get()
+            try:
+                # Notif "memproses..."
+                if processing_msg is None:
+                    processing_msg = await bot.send_message(
+                        chat_id=uid,
+                        text="⏳ Memproses screenshot... mohon tunggu sebentar."
+                    )
+
+                async with GLOBAL_SEMAPHORE:
+                    # Run pipeline
+                    result_path, meta = await process_image_pipeline(
+                        file_path=item["file_path"],
+                        mode=item["mode"],    # "android" | "iphone" | "all"
+                        user_caption=item["caption"],
+                        user_id=uid
+                    )
+
+                # Kirim hasil sebagai dokumen agar EXIF/metadata tetap
+                caption = f"Selesai ✅\nMode: {meta['mode']} • Tema: {meta['theme']}"
+                await bot.send_document(
+                    chat_id=uid,
+                    document=FSInputFile(result_path),
+                    caption=caption
+                )
+            except Exception as e:
+                logging.exception("Processing failed")
+                await bot.send_message(uid, f"⚠️ Gagal memproses gambar: {e}")
+            finally:
+                queue.task_done()
+
+            # Hapus pesan "memproses..." jika antrian kosong
+            if queue.empty() and processing_msg:
+                with suppress(Exception):
+                    await processing_msg.delete()
+                processing_msg = None
+    except asyncio.CancelledError:
+        pass
+
+@router.message(Command("start"))
+async def cmd_start(msg: Message):
+    get_user_state(msg.from_user.id)
+    await msg.reply(
+        "Halo! 👋 Kirim screenshot Info Grup WhatsApp + caption angka target.\n"
+        "Pilih mode:\n"
+        "/android • /iphone • /all (deteksi otomatis)\n\n"
+        "Contoh: setelah /android, kirim foto dengan caption 1234"
+    )
+
+@router.message(Command("help"))
+async def cmd_help(msg: Message):
+    await msg.reply(
+        "Panduan singkat:\n"
+        "1) /android atau /iphone untuk set mode manual, /all untuk auto.\n"
+        "2) Kirim screenshot dengan caption angka target (contoh: 2578).\n"
+        "3) Maks 5 gambar di antrian per user. Proses paralel & aman.\n"
+        "Catatan: Bot mengirim hasil sebagai dokumen agar metadata & resolusi tetap utuh."
+    )
+
+@router.message(Command("android"))
+async def cmd_android(msg: Message):
+    st = get_user_state(msg.from_user.id)
+    st["mode"] = "android"
+    await msg.reply("Mode disetel ke ANDROID ✅\nKirim screenshot + caption angka target.")
+
+@router.message(Command("iphone"))
+async def cmd_iphone(msg: Message):
+    st = get_user_state(msg.from_user.id)
+    st["mode"] = "iphone"
+    await msg.reply("Mode disetel ke IPHONE ✅\nKirim screenshot + caption angka target.")
+
+@router.message(Command("all"))
+async def cmd_all(msg: Message):
+    st = get_user_state(msg.from_user.id)
+    st["mode"] = "all"
+    await msg.reply("Mode disetel ke AUTO-DETECT ✅\nKirim screenshot + caption angka target.")
+
+@router.message(F.photo | F.document)
+async def handle_image(msg: Message, bot: Bot):
+    st = get_user_state(msg.from_user.id)
+    mode = st["mode"]
+
+    # Validasi caption -> angka target (bebas format user)
+    caption = (msg.caption or "").strip()
+    target_number = parse_target_number(caption)
+    if target_number is None:
+        await msg.reply("Mohon sertakan caption angka target. Contoh: 1234")
+        return
+
+    # Unduh file
+    file_id = msg.photo[-1].file_id if msg.photo else msg.document.file_id
+    file = await bot.get_file(file_id)
+    ensure_dirs(cfg["work_dir"])
+    local_path = os.path.join(cfg["work_dir"], f"{msg.from_user.id}_{file.file_unique_id}.bin")
+    await bot.download_file(file.file_path, destination=local_path)
+
+    # Enqueue
+    queue = st["queue"]
+    if queue.full():
+        await msg.reply("Antrian Anda sudah 5 pekerjaan. Mohon tunggu hasil sebelumnya ya 🙏")
+        return
+
+    await queue.put({
+        "file_path": local_path,
+        "caption": caption,
+        "mode": mode
+    })
+
+    # Start worker jika belum berjalan
+    if not st["worker"] or st["worker"].done():
+        st["worker"] = asyncio.create_task(user_worker(bot, msg.from_user.id))
+
+    pos = queue.qsize()
+    await msg.reply(f"✅ Ditambahkan ke antrian. Posisi Anda: {pos}. Akan diproses segera.")
+
+async def main():
+    token = os.getenv("BOT_TOKEN")
+    if not token:
+        raise RuntimeError("BOT_TOKEN belum diisi. Lihat .env.example")
+    bot = Bot(token=token, parse_mode=ParseMode.HTML)
+    dp = Dispatcher()
+    dp.include_router(router)
+    await dp.start_polling(bot)
+
+if __name__ == "__main__":
+    asyncio.run(main())
