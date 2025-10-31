@@ -68,21 +68,40 @@ def resolve_digit_path(mode: str, theme: str, name: str) -> Optional[str]:
             os.path.join(tpl_root(mode, "light"), "digits", name),
             os.path.join(tpl_root(mode, "light"), name),
         ]
+    # juga coba theme kebalikan (dark <-> light) untuk berjaga
+    if theme == "light":
+        cand += [
+            os.path.join(tpl_root(mode, "dark"), "digits", name),
+            os.path.join(tpl_root(mode, "dark"), name),
+        ]
     for p in cand:
         if os.path.exists(p):
             return p
     return None
 
 def resolve_anchor_path(mode: str, theme: str, name: str) -> Optional[str]:
-    cand = [
-        os.path.join(tpl_root(mode, theme), "anchors", name),
-        os.path.join(tpl_root(mode, theme), name),
-    ]
-    if theme != "light":
+    # terima png/jpg/jpeg
+    names = [name] if name.lower().endswith((".png", ".jpg", ".jpeg")) else [f"{name}.png", f"{name}.jpg", f"{name}.jpeg"]
+    cand: List[str] = []
+    for nm in names:
         cand += [
-            os.path.join(tpl_root(mode, "light"), "anchors", name),
-            os.path.join(tpl_root(mode, "light"), name),
+            os.path.join(tpl_root(mode, theme), "anchors", nm),
+            os.path.join(tpl_root(mode, theme), nm),
         ]
+    # fallback ke light
+    if theme != "light":
+        for nm in names:
+            cand += [
+                os.path.join(tpl_root(mode, "light"), "anchors", nm),
+                os.path.join(tpl_root(mode, "light"), nm),
+            ]
+    # fallback juga ke dark jika awalnya light
+    if theme == "light":
+        for nm in names:
+            cand += [
+                os.path.join(tpl_root(mode, "dark"), "anchors", nm),
+                os.path.join(tpl_root(mode, "dark"), nm),
+            ]
     for p in cand:
         if os.path.exists(p):
             return p
