@@ -12,18 +12,18 @@ from aiogram.enums.parse_mode import ParseMode
 from cfg import cfg
 from core.process import process_image_pipeline
 from core.utils import parse_target_number, ensure_dirs
+from core.check import verify_template_pack
 
 logging.basicConfig(level=logging.INFO)
 router = Router()
 
-# State in-memory per user
 USER_STATE: Dict[int, Dict[str, Any]] = {}
 GLOBAL_SEMAPHORE = asyncio.Semaphore(cfg["max_global_workers"])
 
 def get_user_state(uid: int) -> Dict[str, Any]:
     if uid not in USER_STATE:
         USER_STATE[uid] = {
-            "mode": "android",      # default
+            "mode": "android",
             "queue": asyncio.Queue(maxsize=cfg["per_user_queue"]),
             "worker": None
         }
@@ -37,7 +37,6 @@ async def user_worker(bot: Bot, uid: int):
         while True:
             item = await queue.get()
             try:
-                # Notif "memproses..."
                 if processing_msg is None:
                     processing_msg = await bot.send_message(
                         chat_id=uid,
@@ -45,15 +44,13 @@ async def user_worker(bot: Bot, uid: int):
                     )
 
                 async with GLOBAL_SEMAPHORE:
-                    # Run pipeline
                     result_path, meta = await process_image_pipeline(
                         file_path=item["file_path"],
-                        mode=item["mode"],    # "android" | "iphone" | "all"
+                        mode=item["mode"],
                         user_caption=item["caption"],
                         user_id=uid
                     )
 
-                # Kirim hasil sebagai dokumen agar EXIF/metadata tetap
                 caption = f"Selesai ✅\nMode: {meta['mode']} • Tema: {meta['theme']}"
                 await bot.send_document(
                     chat_id=uid,
@@ -66,7 +63,6 @@ async def user_worker(bot: Bot, uid: int):
             finally:
                 queue.task_done()
 
-            # Hapus pesan "memproses..." jika antrian kosong
             if queue.empty() and processing_msg:
                 with suppress(Exception):
                     await processing_msg.delete()
@@ -117,21 +113,18 @@ async def handle_image(msg: Message, bot: Bot):
     st = get_user_state(msg.from_user.id)
     mode = st["mode"]
 
-    # Validasi caption -> angka target (bebas format user)
     caption = (msg.caption or "").strip()
     target_number = parse_target_number(caption)
     if target_number is None:
         await msg.reply("Mohon sertakan caption angka target. Contoh: 1234")
         return
 
-    # Unduh file
     file_id = msg.photo[-1].file_id if msg.photo else msg.document.file_id
     file = await bot.get_file(file_id)
     ensure_dirs(cfg["work_dir"])
     local_path = os.path.join(cfg["work_dir"], f"{msg.from_user.id}_{file.file_unique_id}.bin")
     await bot.download_file(file.file_path, destination=local_path)
 
-    # Enqueue
     queue = st["queue"]
     if queue.full():
         await msg.reply("Antrian Anda sudah 5 pekerjaan. Mohon tunggu hasil sebelumnya ya 🙏")
@@ -143,17 +136,29 @@ async def handle_image(msg: Message, bot: Bot):
         "mode": mode
     })
 
-    # Start worker jika belum berjalan
     if not st["worker"] or st["worker"].done():
         st["worker"] = asyncio.create_task(user_worker(bot, msg.from_user.id))
 
     pos = queue.qsize()
     await msg.reply(f"✅ Ditambahkan ke antrian. Posisi Anda: {pos}. Akan diproses segera.")
 
+async def startup_template_check():
+    missing = []
+    for mode in ("android", "iphone"):
+        for theme in ("light", "dark"):
+            errs = verify_template_pack(mode, theme)
+            if errs:
+                missing.extend(errs)
+    if missing:
+        logging.warning("Beberapa template belum lengkap:\n- " + "\n- ".join(missing))
+    else:
+        logging.info("Semua template minimal tersedia.")
+
 async def main():
     token = os.getenv("BOT_TOKEN")
     if not token:
         raise RuntimeError("BOT_TOKEN belum diisi. Lihat .env.example")
+    await startup_template_check()
     bot = Bot(token=token, parse_mode=ParseMode.HTML)
     dp = Dispatcher()
     dp.include_router(router)
