@@ -1,20 +1,21 @@
 import os
 
+TEMPLATES_DIR = os.getenv("TEMPLATES_DIR", "./tpl")
+TEMPLATES_DIR = os.path.abspath(os.path.expanduser(TEMPLATES_DIR))
+
 cfg = {
     "work_dir": "./.work",
-    "max_global_workers": 2,     # aman untuk VPS 1GB
+    "max_global_workers": 2,
     "per_user_queue": 5,
-    "number_locale": "id_ID",    # hanya untuk referensi
-    "templates_dir": "./tpl",
+    "number_locale": "id_ID",
+    "templates_dir": TEMPLATES_DIR,  # bisa /root/editctc
     "output_dir": "./out",
     "roi": {
-        # ROI dihitung relatif dari anchor 'anggota' (match top-left x,y dan w,h template anchor).
-        # number_box = (anchor_x + dx, anchor_y + dy, width, height)
         "android": {"dx": -300, "dy": 20, "w": 260, "h": 72},
         "iphone":  {"dx": -300, "dy": 30, "w": 260, "h": 78}
     },
-    "theme_threshold": 0.6,      # > 0.6 = light; else dark (berdasarkan luminance)
+    "theme_threshold": 0.6,
     "match_scales": [0.6, 0.7, 0.8, 0.9, 1.0, 1.1],
-    "match_threshold": 0.82,     # template matching correlation threshold
+    "match_threshold": 0.82,
     "save_quality_jpeg": 95
 }
